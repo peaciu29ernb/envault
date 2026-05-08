@@ -1,12 +1,13 @@
-"""Command-line interface for envault."""
+"""Main CLI entry point for envault."""
 
 import sys
 import click
-from pathlib import Path
-
 from envault.vault import create_vault, save_vault, load_vault
-from envault.keystore import store_key, retrieve_key, delete_key, list_projects
+from envault.keystore import store_key, retrieve_key, list_projects
 from envault.rotation import rotate_key, rotate_password
+from envault.audit import record_event
+from envault.cli_audit import audit_cmd
+from envault.cli_export import export_cmd
 
 
 @click.group()
@@ -15,71 +16,80 @@ def cli():
     pass
 
 
-@cli.command("init")
-@click.argument("project")
-@click.option("--env-file", default=".env", show_default=True, help="Path to .env file.")
-@click.option("--password", default=None, help="Use password-based encryption.")
-def init_vault(project, env_file, password):
-    """Initialize a vault for PROJECT from an .env file."""
-    env_path = Path(env_file)
-    if not env_path.exists():
-        click.echo(f"Error: {env_file} not found.", err=True)
+@cli.command()
+@click.argument("env_file")
+@click.argument("vault_file")
+@click.option("--project", "-p", default=None, help="Project name (defaults to vault filename stem).")
+@click.option("--password", default=None, help="Encrypt with a password instead of a generated key.")
+def init_vault(env_file: str, vault_file: str, project: str, password: str):
+    """Encrypt ENV_FILE into VAULT_FILE."""
+    from pathlib import Path
+    project = project or Path(vault_file).stem
+    try:
+        env_text = Path(env_file).read_text()
+    except FileNotFoundError:
+        click.echo(f"Error: env file '{env_file}' not found.", err=True)
         sys.exit(1)
 
-    raw = env_path.read_text()
-    vault, key = create_vault(raw, password=password)
-    vault_path = Path(f"{project}.vault")
-    save_vault(vault, vault_path)
-
-    if key and not password:
-        store_key(project, key)
-        click.echo(f"Vault created at {vault_path}. Key stored in keystore.")
+    if password:
+        vault_data, _ = create_vault(env_text, password=password)
+        click.echo("Vault created with password encryption.")
     else:
-        click.echo(f"Vault created at {vault_path}. Use your password to decrypt.")
+        vault_data, key = create_vault(env_text)
+        store_key(project, key)
+        click.echo(f"Vault created. Key stored for project '{project}'.")
+
+    save_vault(vault_data, vault_file)
+    record_event("init", project, details={"vault": vault_file})
+    click.echo(f"Vault saved to '{vault_file}'.")
 
 
 @cli.command("decrypt")
-@click.argument("project")
-@click.option("--vault-file", default=None, help="Path to vault file (default: <project>.vault).")
-@click.option("--password", default=None, help="Password for decryption.")
-@click.option("--output", default=".env", show_default=True, help="Output .env file path.")
-def decrypt_vault(project, vault_file, password, output):
-    """Decrypt a vault and write the .env file."""
-    vault_path = Path(vault_file) if vault_file else Path(f"{project}.vault")
-    if not vault_path.exists():
-        click.echo(f"Error: {vault_path} not found.", err=True)
+@click.argument("vault_file")
+@click.option("--project", "-p", default=None)
+@click.option("--password", default=None)
+def decrypt_vault(vault_file: str, project: str, password: str):
+    """Decrypt VAULT_FILE and print its contents."""
+    from pathlib import Path
+    project = project or Path(vault_file).stem
+    try:
+        if password:
+            env_dict = load_vault(vault_file, password=password)
+        else:
+            key = retrieve_key(project)
+            env_dict = load_vault(vault_file, key=key)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
-    key = None
-    if not password:
-        key = retrieve_key(project)
-
-    env_dict = load_vault(vault_path, key=key, password=password)
-    lines = "\n".join(f"{k}={v}" for k, v in env_dict.items())
-    Path(output).write_text(lines + "\n")
-    click.echo(f"Decrypted to {output}.")
+    record_event("decrypt", project, details={"vault": vault_file})
+    for k, v in env_dict.items():
+        click.echo(f"{k}={v}")
 
 
-@cli.command("rotate")
-@click.argument("project")
-@click.option("--vault-file", default=None, help="Path to vault file.")
-def rotate(project, vault_file):
-    """Rotate the encryption key for PROJECT."""
-    vault_path = Path(vault_file) if vault_file else Path(f"{project}.vault")
-    if not vault_path.exists():
-        click.echo(f"Error: {vault_path} not found.", err=True)
+@cli.command()
+@click.argument("vault_file")
+@click.option("--project", "-p", default=None)
+def rotate(vault_file: str, project: str):
+    """Rotate the encryption key for VAULT_FILE."""
+    from pathlib import Path
+    project = project or Path(vault_file).stem
+    try:
+        old_key = retrieve_key(project)
+        new_vault, new_key = rotate_key(vault_file, old_key)
+        save_vault(new_vault, vault_file)
+        store_key(project, new_key)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
-    old_key = retrieve_key(project)
-    new_vault, new_key = rotate_key(vault_path, old_key)
-    save_vault(new_vault, vault_path)
-    store_key(project, new_key)
+    record_event("rotate", project, details={"vault": vault_file})
     click.echo(f"Key rotated for project '{project}'.")
 
 
 @cli.command("list")
 def list_cmd():
-    """List all projects in the keystore."""
+    """List all projects with stored keys."""
     projects = list_projects()
     if not projects:
         click.echo("No projects found.")
@@ -88,15 +98,15 @@ def list_cmd():
             click.echo(p)
 
 
-@cli.command("delete")
-@click.argument("project")
-def delete_cmd(project):
-    """Remove a project key from the keystore."""
-    removed = delete_key(project)
-    if removed:
-        click.echo(f"Key for '{project}' removed.")
-    else:
-        click.echo(f"No key found for '{project}'.")
+@cli.command("export")
+@click.pass_context
+def export_alias(ctx):
+    """Alias — use 'envault export run' instead."""
+    click.echo("Use: envault export run <vault_file> [options]")
+
+
+cli.add_command(audit_cmd, name="audit")
+cli.add_command(export_cmd, name="export")
 
 
 if __name__ == "__main__":
