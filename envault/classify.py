@@ -59,3 +59,20 @@ def list_categories(categories: Optional[Dict[str, List[str]]] = None) -> List[s
     """Return sorted list of known category names."""
     cats = categories if categories is not None else _DEFAULT_CATEGORIES
     return sorted(cats.keys())
+
+
+def summarize_classification(
+    env: Dict[str, str],
+    categories: Optional[Dict[str, List[str]]] = None,
+) -> Dict[str, int]:
+    """Return a summary of how many keys fall into each category.
+
+    Useful for a quick overview without enumerating every key.
+
+    Example::
+
+        >>> summarize_classification({"DB_HOST": "localhost", "APP_ENV": "prod", "UNKNOWN": "x"})
+        {'app': 1, 'database': 1, 'uncategorized': 1}
+    """
+    classified = classify_env(env, categories)
+    return {cat: len(keys) for cat, keys in sorted(classified.items())}
