@@ -43,7 +43,7 @@ def transform_apply(vault_file, key, transforms, password, dry_run):
     except Exception as exc:
         raise click.ClickException(f"Failed to save vault: {exc}")
 
-    click.echo(f"Transformed '{key}' → {new_val}")
+    click.echo(f"Transformed '{key}' \u2192 {new_val}")
 
 
 @transform_cmd.command("batch")
@@ -62,6 +62,11 @@ def transform_batch(vault_file, rules_file, password, dry_run):
     except Exception as exc:
         raise click.ClickException(f"Failed to read rules file: {exc}")
 
+    if not isinstance(rules, dict):
+        raise click.ClickException(
+            f"Rules file must contain a JSON object, got {type(rules).__name__}."
+        )
+
     try:
         env = load_vault(vault_file, password=password)
     except Exception as exc:
@@ -75,7 +80,7 @@ def transform_batch(vault_file, rules_file, password, dry_run):
     changed = {k for k in updated if updated[k] != env.get(k)}
     if dry_run:
         for k in sorted(changed):
-            click.echo(f"{k}: {env[k]!r} → {updated[k]!r}")
+            click.echo(f"{k}: {env[k]!r} \u2192 {updated[k]!r}")
         return
 
     try:
