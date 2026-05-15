@@ -30,7 +30,10 @@ def load_checksum(project: str, base_dir: str = ".envault") -> Optional[str]:
     path = _checksum_path(base_dir, project)
     if not path.exists():
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
     return data.get("sha256")
 
 
