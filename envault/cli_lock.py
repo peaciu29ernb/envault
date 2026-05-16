@@ -5,6 +5,13 @@ from pathlib import Path
 from envault.lock import lock_key, unlock_key, get_locks, is_locked
 
 
+def _resolve_base_dir(base_dir: str | None) -> dict:
+    """Return a kwargs dict with base_dir if provided, else empty dict."""
+    if base_dir:
+        return {"base_dir": Path(base_dir)}
+    return {}
+
+
 @click.group(name="lock")
 def lock_cmd():
     """Lock or unlock env keys to prevent accidental modification."""
@@ -16,9 +23,7 @@ def lock_cmd():
 @click.option("--base-dir", default=None, help="Override lock storage directory.")
 def lock_add(project: str, key: str, base_dir: str):
     """Lock KEY in PROJECT."""
-    bd = Path(base_dir) if base_dir else None
-    kwargs = {"base_dir": bd} if bd else {}
-    locks = lock_key(project, key, **kwargs)
+    locks = lock_key(project, key, **_resolve_base_dir(base_dir))
     click.echo(f"Locked '{key}' in project '{project}'.")
     click.echo(f"Locked keys: {', '.join(locks) if locks else '(none)'}")
 
@@ -29,9 +34,7 @@ def lock_add(project: str, key: str, base_dir: str):
 @click.option("--base-dir", default=None, help="Override lock storage directory.")
 def lock_remove(project: str, key: str, base_dir: str):
     """Unlock KEY in PROJECT."""
-    bd = Path(base_dir) if base_dir else None
-    kwargs = {"base_dir": bd} if bd else {}
-    removed = unlock_key(project, key, **kwargs)
+    removed = unlock_key(project, key, **_resolve_base_dir(base_dir))
     if removed:
         click.echo(f"Unlocked '{key}' in project '{project}'.")
     else:
@@ -43,9 +46,7 @@ def lock_remove(project: str, key: str, base_dir: str):
 @click.option("--base-dir", default=None, help="Override lock storage directory.")
 def lock_list(project: str, base_dir: str):
     """List all locked keys for PROJECT."""
-    bd = Path(base_dir) if base_dir else None
-    kwargs = {"base_dir": bd} if bd else {}
-    locks = get_locks(project, **kwargs)
+    locks = get_locks(project, **_resolve_base_dir(base_dir))
     if not locks:
         click.echo(f"No locked keys for project '{project}'.")
     else:
@@ -60,8 +61,6 @@ def lock_list(project: str, base_dir: str):
 @click.option("--base-dir", default=None, help="Override lock storage directory.")
 def lock_check(project: str, key: str, base_dir: str):
     """Check whether KEY is locked in PROJECT."""
-    bd = Path(base_dir) if base_dir else None
-    kwargs = {"base_dir": bd} if bd else {}
-    locked = is_locked(project, key, **kwargs)
+    locked = is_locked(project, key, **_resolve_base_dir(base_dir))
     status = "LOCKED" if locked else "unlocked"
     click.echo(f"Key '{key}' in project '{project}': {status}")
