@@ -76,3 +76,12 @@ def test_clear_pins_no_file_returns_zero(pin_dir):
 def test_pins_isolated_per_project(pin_dir):
     pin_key("proj_a", "KEY", base_dir=pin_dir)
     assert is_pinned("proj_b", "KEY", base_dir=pin_dir) is False
+
+
+def test_unpin_key_removes_only_target(pin_dir):
+    """Unpinning one key should leave other pinned keys intact."""
+    pin_key("myproject", "KEEP_ME", base_dir=pin_dir)
+    pin_key("myproject", "REMOVE_ME", base_dir=pin_dir)
+    unpin_key("myproject", "REMOVE_ME", base_dir=pin_dir)
+    assert is_pinned("myproject", "KEEP_ME", base_dir=pin_dir) is True
+    assert is_pinned("myproject", "REMOVE_ME", base_dir=pin_dir) is False
